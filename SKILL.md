@@ -1,13 +1,14 @@
 ---
 name: mcp-ocr
-description: Baca teks dari GAMBAR dan DOKUMEN via MCP OCR (tool mcp__ocr__read_document, alias mcp__ocr__ocr_image). Gunakan SAAT user kasih gambar/screenshot/foto/scan/PDF/Word/Excel/PPT dan minta dibaca, dianalisa, atau di-fix (screenshot error, stack trace, pesan bug, dokumen scan, proposal PDF, laporan docx, data xlsx, slide pptx), ATAU saat gambar DI-PASTE langsung di kolom chat opencode (error "Cannot read image / model does not support image input") — ekstrak dulu dari DB opencode via extract-pasted-image.py. Memberi 'mata' ke model tanpa vision (mis. DeepSeek v4 Flash): semua format diubah jadi teks murni yang bisa dianalisa. Triggers: baca gambar ini, lihat screenshot, ocr, gambar error, analisa screenshot, fix bug dari gambar, scan dokumen, baca pdf/docx/xlsx/pptx, image to text, mata, vision, paste gambar, gambar tempelan, cannot read image.
+description: Baca teks dari GAMBAR dan DOKUMEN via MCP OCR (tool mcp__ocr__read_document, alias mcp__ocr__ocr_image) DAN ekstrak WARNA dari gambar (mcp__ocr__read_colors). Gunakan SAAT user kasih gambar/screenshot/foto/scan/PDF/Word/Excel/PPT dan minta dibaca, dianalisa, atau di-fix (screenshot error, stack trace, pesan bug, dokumen scan, proposal PDF, laporan docx, data xlsx, slide pptx), ATAU saat gambar DI-PASTE langsung di kolom chat opencode (error "Cannot read image / model does not support image input") — ekstrak dulu dari DB opencode via extract-pasted-image.py. Juga saat user mau tahu/ngedit WARNA dari screenshot web (copas tampilan web, ganti warna, cari hex): pakai read_colors. Memberi 'mata' ke model tanpa vision (mis. DeepSeek v4 Flash): semua format diubah jadi teks murni yang bisa dianalisa. Triggers: baca gambar ini, lihat screenshot, ocr, gambar error, analisa screenshot, fix bug dari gambar, scan dokumen, baca pdf/docx/xlsx/pptx, image to text, mata, vision, paste gambar, gambar tempelan, cannot read image, warna apa, cari hex warna, color palette, warna dominan, edit warna.
 ---
 
-# MCP-OCR — Baca Gambar & Dokumen Jadi Teks
+# MCP-OCR — Baca Gambar & Dokumen Jadi Teks + Ekstrak Warna
 
 Tools:
-- **`mcp__ocr__read_document(file_path, mode="auto", enhance=true)`** — nama utama
+- **`mcp__ocr__read_document(file_path, mode="auto", enhance=true)`** — nama utama (teks)
 - `mcp__ocr__ocr_image(...)` — alias kompatibel (fungsi sama)
+- **`mcp__ocr__read_colors(file_path, top_n=8, merge=true)`** — warna dominan dari gambar
 
 ## Format didukung
 | Format | Cara baca |
@@ -62,6 +63,26 @@ read_document(file_path="laporan-bug.docx", mode="text", enhance=true)
 | `file_path` | path lokal / URL | wajib |
 | `mode` | `auto` \| `text` \| `code` | urutan baris OCR (`code` terbaik utk stack trace) |
 | `enhance` | `true` (default) | autocontrast + upscale teks kecil |
+
+## Baca warna dari gambar (`read_colors`) — untuk edit warna / copas web
+
+DeepSeek & model teks-only **tidak bisa lihat warna**. `read_colors` terjemahkan warna gambar jadi teks: hex + rgb + nama + shade + % area + region. Cocok buat: copy-paste screenshot halaman web, mau ganti warna, cari nilai hex yang dipakai desain.
+
+```
+read_colors(file_path="web-design.png")
+read_colors(file_path="ui.png", top_n=12)        # lebih banyak warna
+read_colors(file_path="ui.png", merge=false)     # tanpa gabung shade dekat
+```
+
+Contoh output:
+```
+[COLORS] web-design.png — 1280x800px — top 6 warna dominan
+1. #FFFFFF  rgb(255, 255, 255)  ~white (light)  53.1%  posisi: background
+2. #1F2937  rgb(31, 41, 55)  ~custom (dark)  19.8%  posisi: header/navbar
+3. #3B82F6  rgb(59, 130, 246)  ~custom (dark)  6.5%  posisi: accent/panel
+```
+
+Region label: `background`, `header/navbar`, `footer`, `sidebar`, `panel/card`, `accent/button/text`, `band`. Nilai hex sudah siap tempel ke CSS/Tailwind. Warna yang namanya bukan warna umum (Tailwind dll) dilabel `~custom` — pakai hex/rgb-nya, bukan namanya.
 
 ## Verifikasi / troubleshooting
 - Tes cepat semua format (tanpa MCP): `.venv/Scripts/python.exe server.py --selftest <file-atau-folder>`

@@ -22,9 +22,41 @@ Gambar / PDF / Word / Excel / PPT
 
 **Tidak didukung:** `.doc` / `.xls` versi lama → simpan ulang sebagai `.docx` / `.xlsx`.
 
-**Tool yang tersedia** (2 nama, fungsi sama):
-- `read_document(file_path, mode, enhance)` — nama penuh
-- `ocr_image(image_path, mode, enhance)` — alias kompatibel
+**Tool yang tersedia:**
+- `read_document(file_path, mode, enhance)` — nama penuh (teks)
+- `ocr_image(image_path, mode, enhance)` — alias kompatibel (teks)
+- `read_colors(file_path, top_n=8, merge=true)` — 🎨 **ekstrak warna dominan dari gambar**
+
+---
+
+## 🎨 Baca Warna dari Gambar (`read_colors`)
+
+Model teks-only juga **tidak bisa melihat warna**. `read_colors` terjemahkan warna gambar jadi teks berstruktur — hex, rgb, nama, shade, persentase area, dan posisi region. Cocok buat: copy-paste screenshot halaman web, mau ganti warna desain, cari nilai hex yang dipakai.
+
+```
+read_colors(file_path="web-design.png")
+read_colors(file_path="ui.png", top_n=12)        # lebih banyak warna
+read_colors(file_path="ui.png", merge=false)     # tanpa gabung shade dekat
+```
+
+| Param | Nilai | Fungsi |
+|---|---|---|
+| `file_path` | path gambar lokal / URL | wajib |
+| `top_n` | `8` (default) | jumlah warna teratas |
+| `merge` | `true` (default) | gabung warna nyaris-sama (<30 delta) |
+
+Contoh output:
+
+```
+[COLORS] web-design.png — 1280x800px — top 6 warna dominan
+1. #FFFFFF  rgb(255, 255, 255)  ~white (light)  53.1%  posisi: background
+2. #1F2937  rgb(31, 41, 55)  ~custom (dark)  19.8%  posisi: header/navbar
+3. #3B82F6  rgb(59, 130, 246)  ~custom (dark)  6.5%  posisi: accent/panel
+```
+
+Region label: `background`, `header/navbar`, `footer`, `sidebar`, `panel/card`, `accent/button/text`, `band`. Nilai hex sudah siap tempel ke CSS/Tailwind. Warna tanpa nama umum (Tailwind dll) dilabel `~custom` — pakai hex/rgb-nya.
+
+> **Flow copas web:** gambar di-paste di chat → `extract-pasted-image.py` → `read_colors(...)` → dapat hex → edit warna.
 
 ---
 
@@ -161,7 +193,7 @@ Opsi:
 Super-MCP-OCR-Deepseek/
 ├── README.md                      ← dokumentasi ini
 ├── SKILL.md                       ← skill instruction (untuk agent)
-├── server.py                      ← MCP OCR server (inti)
+├── server.py                      ← MCP OCR server (inti + read_colors)
 ├── extract-pasted-image.py        ← helper gambar tempelan opencode
 ├── pyproject.toml                 ← dependensi
 └── .python-version                ← versi Python
@@ -174,8 +206,9 @@ Super-MCP-OCR-Deepseek/
 1. **`_resolve_path`** — terima path lokal / URL http(s) / file:// → file lokal.
 2. **Routing per ekstensi** — gambar → OCR; pdf → ekstrak+OCR; office → ekstrak; teks → baca.
 3. **`_ocr_pil`** (gambar) — pre-process (grayscale + autocontrast + upscale teks kecil) → RapidOCR ONNX → susun hasil jadi baris visual (urut `y` lalu `x`).
-4. **Confidence filter** — buang hasil OCR dengan skor < 0.35.
-5. **Output** — header metadata + teks murni, siap dianalisa LLM.
+4. **`_extract_palette` / `_read_colors`** (gambar) — flatten RGBA→RGB → downscale → kuantisasi median-cut (PIL) → cluster warna dominan → gabung shade dekat → hitung % area + region.
+5. **Confidence filter** — buang hasil OCR dengan skor < 0.35.
+6. **Output** — header metadata + teks murni, siap dianalisa LLM.
 
 ### Kenapa preprocessing?
 
