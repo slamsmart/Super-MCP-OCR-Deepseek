@@ -229,17 +229,16 @@ def _extract_palette(img, top_n, merge=True):
     for e in entries:
         placed = False
         for me in merged:
-            r, g, b = me["rgb"]
-            dist = ((r - e["rgb"][0]) ** 2 + (g - e["rgb"][1]) ** 2 + (b - e["rgb"][2]) ** 2) ** 0.5
+            dr, dg, db = me["dom"]
+            dist = ((dr - e["rgb"][0]) ** 2 + (dg - e["rgb"][1]) ** 2 + (db - e["rgb"][2]) ** 2) ** 0.5
             small = me["count"] / total < 0.02 or e["count"] / total < 0.02
             if dist < 30 and (dist < 12 or small):
-                n = me["count"]
-                me["rgb"] = [int((r * n + e["rgb"][0] * e["count"]) / (n + e["count"])) for _ in range(3)]
-                me["count"] = n + e["count"]
+                me["count"] += e["count"]
                 me["idx"] = me["idx"] + [e["idx"]]
                 placed = True
                 break
         if not placed:
+            e["dom"] = list(e["rgb"])
             e["idx"] = [e["idx"]]
             merged.append(e)
     merged.sort(key=lambda me: -me["count"])
@@ -254,7 +253,7 @@ def _read_colors(name, path, top_n=8, merge=True) -> str:
     palette, arr, w, h, total = _extract_palette(img, top_n, merge)
     lines = []
     for rank, e in enumerate(palette, 1):
-        r, g, b = e["rgb"]
+        r, g, b = e["dom"]
         hexs = "#%02X%02X%02X" % (r, g, b)
         pct = 100.0 * e["count"] / total
         ys, xs = np.where(np.isin(arr, e["idx"]))
