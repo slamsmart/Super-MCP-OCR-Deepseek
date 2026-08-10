@@ -234,3 +234,5 @@ Super-MCP-OCR-Deepseek/
 MIT — bebas dipakai, diubah, disebarluaskan.
 
 Dibuat untuk mengaktifkan DeepSeek & LLM teks-only lainnya di ekosistem MCP (opencode, Claude Code, dll).
+
+[![M8ven Score](https://m8ven.ai/badge/mcp/slamsmart-super-mcp-ocr-deepseek-e9tfry)](https://m8ven.ai/mcp/slamsmart-super-mcp-ocr-deepseek-e9tfry)
