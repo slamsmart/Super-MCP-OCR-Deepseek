@@ -1,4 +1,4 @@
-# 🦉 Super MCP OCR for DeepSeek (teks-only LLM)
+# 🦉 Super MCP OCR for DeepSeek (teks-only LLM) [![M8ven Score](https://m8ven.ai/badge/mcp/slamsmart-super-mcp-ocr-deepseek-e9tfry)](https://m8ven.ai/mcp/slamsmart-super-mcp-ocr-deepseek-e9tfry)
 
 Memberi **"mata"** ke model AI yang tidak punya vision (mis. **DeepSeek v4 Flash**, DeepSeek R1, atau LLM teks-only lain) — semua gambar & dokumen dibaca jadi **teks murni** yang bisa langsung dianalisa.
 
@@ -235,4 +235,4 @@ MIT — bebas dipakai, diubah, disebarluaskan.
 
 Dibuat untuk mengaktifkan DeepSeek & LLM teks-only lainnya di ekosistem MCP (opencode, Claude Code, dll).
 
-[![M8ven Score](https://m8ven.ai/badge/mcp/slamsmart-super-mcp-ocr-deepseek-e9tfry)](https://m8ven.ai/mcp/slamsmart-super-mcp-ocr-deepseek-e9tfry)
+
