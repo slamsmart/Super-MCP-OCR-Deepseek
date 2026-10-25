@@ -11,6 +11,11 @@ Bisa baca:
   - OFFICE : docx, xlsx/xlsm, pptx, rtf -> ekstrak teks
   - TEXT   : txt, md, csv, json, xml, log, yaml, ini, cfg, toml, html
 
+Fallback tanpa Python OCR stack: kalau RapidOCR (onnxruntime) tidak terpasang,
+server otomatis pakai CLI tesseract; kalau pypdfium2 tidak ada, PDF dibaca lewat
+poppler (pdftotext / pdftoppm). Butuh: tesseract-ocr (+ tesseract-ocr-ind), poppler-utils.
+Env: MCP_OCR_ENGINE=auto|rapidocr|tesseract   MCP_OCR_LANGS=ind+eng
+
 Jalankan sebagai MCP stdio server:
     python server.py
 
@@ -19,6 +24,8 @@ Selftest (tanpa MCP, dukung file ATAU folder):
 """
 
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -58,6 +65,72 @@ def _get_engine():
         from rapidocr_onnxruntime import RapidOCR
         _engine = RapidOCR()
     return _engine
+
+
+# ---------- fallback tesseract (tanpa RapidOCR / onnxruntime) ----------
+# Berguna di mesin yang tidak bisa install Python OCR stack (sandbox, CI, server
+# polos): cukup `apt-get install tesseract-ocr tesseract-ocr-ind poppler-utils`.
+# Atur lewat env:  MCP_OCR_ENGINE=auto|rapidocr|tesseract   MCP_OCR_LANGS=ind+eng
+_ENGINE_PREF = (os.environ.get("MCP_OCR_ENGINE") or "auto").strip().lower()
+
+
+def _tesseract_bin():
+    return shutil.which("tesseract")
+
+
+def _tesseract_langs() -> str:
+    """Bahasa untuk tesseract, hanya yang benar-benar terpasang (default ind+eng)."""
+    want = [p for p in (os.environ.get("MCP_OCR_LANGS") or "ind+eng").split("+") if p.strip()]
+    bin_ = _tesseract_bin()
+    if not bin_:
+        return "+".join(want) or "eng"
+    try:
+        out = subprocess.run([bin_, "--list-langs"], capture_output=True, text=True, timeout=20)
+        have = {ln.strip() for ln in (out.stdout or "").splitlines()[1:] if ln.strip()}
+    except Exception:
+        have = set()
+    use = [w for w in want if not have or w in have]
+    return "+".join(use) or "eng"
+
+
+def _ocr_tesseract(img: Image.Image):
+    """OCR satu gambar lewat CLI tesseract (TSV) -> (body_text, avg_confidence)."""
+    bin_ = _tesseract_bin()
+    if not bin_:
+        raise RuntimeError(
+            "RapidOCR tidak tersedia dan binary 'tesseract' juga tidak ada. "
+            "Install: apt-get install -y tesseract-ocr tesseract-ocr-ind poppler-utils"
+        )
+    img = _preprocess(img, True)
+    with tempfile.TemporaryDirectory() as td:
+        png = os.path.join(td, "page.png")
+        img.save(png)
+        out = subprocess.run(
+            [bin_, png, "stdout", "-l", _tesseract_langs(), "--psm", "3", "tsv"],
+            capture_output=True, text=True, timeout=180,
+        )
+    # TSV: level page block par line word left top w h conf text
+    lines, confs = {}, []
+    for row in (out.stdout or "").splitlines()[1:]:
+        cols = row.split("\t")
+        if len(cols) < 12:
+            continue
+        text = cols[11].strip()
+        try:
+            conf = float(cols[10])
+        except ValueError:
+            continue
+        if not text or conf < 35:  # buang noise, setara filter 0.35 milik RapidOCR
+            continue
+        key = (int(cols[1] or 0), int(cols[2] or 0), int(cols[3] or 0), int(cols[4] or 0))
+        left = int(cols[6]) if cols[6].lstrip("-").isdigit() else 0
+        lines.setdefault(key, []).append((left, text))
+        confs.append(conf)
+    if not lines:
+        return "", 0.0
+    ordered = sorted(lines.items(), key=lambda kv: kv[0])
+    body = "\n".join(" ".join(t for _x, t in sorted(words)) for _k, words in ordered)
+    return body, sum(confs) / len(confs) / 100.0
 
 
 def _resolve_path(file_path: str):
@@ -132,18 +205,28 @@ def _sort_into_lines(items):
 
 
 def _ocr_pil(img: Image.Image):
-    """OCR satu PIL image -> (body_text, avg_confidence)."""
-    img = _preprocess(img, True)
-    result, _elapse = _get_engine()(np.array(img))
-    if not result:
-        return "", 0.0
-    items = [(r[0], r[1], float(r[2])) for r in result if float(r[2]) >= 0.35]
-    if not items:
-        return "", 0.0
-    lines = _sort_into_lines(items)
-    body = "\n".join(" ".join(it[1] for it in ln) for ln in lines)
-    conf = sum(it[2] for it in items) / len(items)
-    return body, conf
+    """OCR satu PIL image -> (body_text, avg_confidence, engine).
+
+    Urutan: RapidOCR (default) → kalau tidak terpasang / error / hasilnya kosong,
+    otomatis jatuh ke CLI tesseract. Paksa satu mesin dengan
+    MCP_OCR_ENGINE=rapidocr|tesseract.
+    """
+    if _ENGINE_PREF != "tesseract":
+        try:
+            result, _elapse = _get_engine()(np.array(_preprocess(img, True)))
+            items = [(r[0], r[1], float(r[2])) for r in (result or []) if float(r[2]) >= 0.35]
+            if items:
+                lines = _sort_into_lines(items)
+                body = "\n".join(" ".join(it[1] for it in ln) for ln in lines)
+                conf = sum(it[2] for it in items) / len(items)
+                return body, conf, "rapidocr"
+            if _ENGINE_PREF == "rapidocr":
+                return "", 0.0, "rapidocr"
+        except Exception:
+            if _ENGINE_PREF == "rapidocr":
+                raise
+    body, conf = _ocr_tesseract(img)
+    return body, conf, "tesseract"
 
 
 # ---------- color extraction ----------
@@ -280,12 +363,12 @@ def _read_image(name, path) -> str:
     t0 = time.time()
     img = Image.open(path)
     w, h = img.size
-    body, conf = _ocr_pil(img)
+    body, conf, engine = _ocr_pil(img)
     if not body:
         return f"[OCR] {name} ({w}x{h}px): tidak ada teks terdeteksi."
     header = (
         f"[OCR] {name} — {w}x{h}px — {len(body.splitlines())} baris — "
-        f"avg confidence {conf:.2f} — {time.time() - t0:.1f}s\n" + "-" * 52
+        f"avg confidence {conf:.2f} — engine {engine} — {time.time() - t0:.1f}s\n" + "-" * 52
     )
     return header + "\n" + body
 
@@ -301,12 +384,20 @@ def _read_text_file(path) -> str:
 
 
 def _read_pdf(path) -> str:
+    try:
+        return _read_pdf_pdfium(path)
+    except ImportError:
+        # pypdfium2 tidak terpasang → pakai poppler + tesseract
+        return _read_pdf_poppler(path)
+
+
+def _read_pdf_pdfium(path) -> str:
     import pypdfium2 as pdfium
     t0 = time.time()
     pdf = pdfium.PdfDocument(str(path))
     n = len(pdf)
     max_pages = 25
-    parts, ocr_pages = [], 0
+    parts, ocr_pages, engine = [], 0, "-"
     for i in range(min(n, max_pages)):
         page = pdf[i]
         try:
@@ -318,11 +409,49 @@ def _read_pdf(path) -> str:
             parts.append(f"--- Halaman {i + 1} ---\n{txt}")
         else:
             bitmap = page.render(scale=2.0)
-            body, _conf = _ocr_pil(bitmap.to_pil())
+            body, _conf, engine = _ocr_pil(bitmap.to_pil())
             ocr_pages += 1
-            parts.append(f"--- Halaman {i + 1} (OCR) ---\n" + (body or "(halaman kosong/tanpa teks)"))
+            parts.append(f"--- Halaman {i + 1} (OCR {engine}) ---\n" + (body or "(halaman kosong/tanpa teks)"))
     header = (
-        f"[PDF] {path.name} — {n} halaman ({ocr_pages} hal scan di-OCR) — "
+        f"[PDF] {path.name} — {n} halaman ({ocr_pages} hal scan di-OCR, engine {engine}) — "
+        f"{time.time() - t0:.1f}s\n" + "-" * 52
+    )
+    return header + "\n\n".join(parts)
+
+
+def _read_pdf_poppler(path) -> str:
+    """Fallback PDF tanpa Python: pdftotext untuk PDF digital, pdftoppm + tesseract untuk scan."""
+    t0 = time.time()
+    if shutil.which("pdftotext"):
+        out = subprocess.run(
+            ["pdftotext", "-layout", str(path), "-"], capture_output=True, text=True, timeout=180
+        )
+        txt = _sanitize(out.stdout or "").strip()
+        if txt:
+            header = (
+                f"[PDF] {path.name} — teks native via poppler pdftotext — "
+                f"{time.time() - t0:.1f}s\n" + "-" * 52
+            )
+            return header + "\n" + txt[:_MAX_TEXT_CHARS]
+    ppm = shutil.which("pdftoppm")
+    if not ppm:
+        raise RuntimeError(
+            "pypdfium2 tidak ada dan poppler (pdftotext/pdftoppm) juga tidak ada. "
+            "Install: apt-get install -y poppler-utils tesseract-ocr tesseract-ocr-ind"
+        )
+    with tempfile.TemporaryDirectory() as td:
+        subprocess.run(
+            [ppm, "-r", "200", "-png", "-l", "25", str(path), os.path.join(td, "page")],
+            capture_output=True, text=True, timeout=600,
+        )
+        pages = sorted(Path(td).glob("page-*.png"))
+        parts, engine = [], "-"
+        for i, pg in enumerate(pages, 1):
+            with Image.open(pg) as im:
+                body, _conf, engine = _ocr_pil(im)
+            parts.append(f"--- Halaman {i} (OCR {engine}) ---\n" + (body or "(halaman kosong/tanpa teks)"))
+    header = (
+        f"[PDF] {path.name} — {len(pages)} hal scan di-OCR (poppler + {engine}) — "
         f"{time.time() - t0:.1f}s\n" + "-" * 52
     )
     return header + "\n\n".join(parts)
@@ -526,8 +655,12 @@ def _selftest(target: str | None = None):
         print("sample image dibuat:", target)
     out = _read_any(target)
     print(out)
-    print("\n--- warna dominan ---")
-    print(_read_colors(target, target, top_n=6))
+    if Path(target).suffix.lower() in _IMG_EXTS:
+        print("\n--- warna dominan ---")
+        try:
+            print(_read_colors(target, target, top_n=6))
+        except Exception as e:
+            print(f"--- colors GAGAL: {e}")
     print("\n== DONE ==")
 
 

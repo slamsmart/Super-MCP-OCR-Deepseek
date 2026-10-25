@@ -150,6 +150,26 @@ claude mcp add ocr --scope user -- ~/.claude/mcp-ocr/.venv/Scripts/python.exe ~/
 
 Di Linux/macOS gunakan `.venv/bin/python` alih-alih `.venv/Scripts/python.exe`.
 
+### Server auto-fallback ke tesseract (tanpa Python OCR stack)
+
+`server.py` **tidak wajib** RapidOCR. Urutannya: **RapidOCR → tesseract → pesan error jelas**.
+
+- RapidOCR tidak terpasang / error / hasilnya kosong → otomatis shell ke `tesseract`
+  (bahasa default `ind+eng`, hanya bahasa yang terpasang yang dipakai).
+- `pypdfium2` tidak ada → PDF lewat poppler: `pdftotext` untuk PDF digital,
+  `pdftoppm` + tesseract untuk halaman scan.
+- Env: `MCP_OCR_ENGINE=auto|rapidocr|tesseract` (paksa satu mesin), `MCP_OCR_LANGS=ind+eng`.
+- Header hasil menyebut mesin yang dipakai: `engine rapidocr` / `engine tesseract`.
+
+```bash
+pip install mcp pillow numpy          # tanpa rapidocr & pypdfium2
+python server.py --selftest scan.pdf            # -> engine tesseract
+MCP_OCR_ENGINE=tesseract MCP_OCR_LANGS=eng python server.py --selftest foto.jpg
+```
+
+Artinya di sandbox/CI cukup `apt-get install -y tesseract-ocr tesseract-ocr-ind poppler-utils`
+lalu pip 3 paket ringan di atas — tanpa onnxruntime (~ratusan MB).
+
 ## Fallback CLI `ocr.sh` — OCR tanpa Python
 
 Kalau mesinnya tidak punya env Python (`uv`/pip) — sandbox, CI, server polos, mesin

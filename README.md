@@ -110,6 +110,24 @@ Bedanya dengan server MCP: `ocr.sh` cuma output teks mentah, tanpa `read_colors`
 
 > ✅ Uji nyata di sandbox Linux: PNG teks Indonesia + angka, PDF image-only, dan gambar yang diblur + dikecilkan 60% (simulasi foto HP) — ketiganya kebaca persis.
 
+### 🪶 Mode ringan: server auto-fallback ke tesseract
+
+`server.py` **tidak wajib** RapidOCR/onnxruntime. Urutannya: **RapidOCR → tesseract → pesan error jelas**.
+
+- RapidOCR tidak terpasang / error / hasil kosong → otomatis pakai CLI `tesseract`.
+- `pypdfium2` tidak ada → PDF lewat poppler: `pdftotext` (PDF digital) atau `pdftoppm` + tesseract (halaman scan).
+- Env: `MCP_OCR_ENGINE=auto|rapidocr|tesseract` dan `MCP_OCR_LANGS=ind+eng` (bahasa yang tidak terpasang otomatis dilewati).
+- Header hasil menyebut mesinnya: `engine rapidocr` / `engine tesseract`.
+
+```bash
+sudo apt-get install -y tesseract-ocr tesseract-ocr-ind poppler-utils
+pip install mcp pillow numpy           # cukup ini, tanpa onnxruntime (~ratusan MB)
+python server.py --selftest scan.pdf   # -> engine tesseract
+```
+
+> ✅ Uji nyata (venv tanpa `rapidocr` & `pypdfium2`): gambar → `engine tesseract` (conf 0.95),
+> PDF scan → `poppler + tesseract` per halaman, PDF digital → `pdftotext`. Semua exit code 0.
+
 ---
 
 ## 🚀 Cara Setup
@@ -250,10 +268,11 @@ Super-MCP-OCR-Deepseek/
 
 1. **`_resolve_path`** — terima path lokal / URL http(s) / file:// → file lokal.
 2. **Routing per ekstensi** — gambar → OCR; pdf → ekstrak+OCR; office → ekstrak; teks → baca.
-3. **`_ocr_pil`** (gambar) — pre-process (grayscale + autocontrast + upscale teks kecil) → RapidOCR ONNX → susun hasil jadi baris visual (urut `y` lalu `x`).
-4. **`_extract_palette` / `_read_colors`** (gambar) — flatten RGBA→RGB → downscale → kuantisasi median-cut (PIL) → cluster warna dominan → gabung shade dekat → hitung % area + region.
-5. **Confidence filter** — buang hasil OCR dengan skor < 0.35.
-6. **Output** — header metadata + teks murni, siap dianalisa LLM.
+3. **`_ocr_pil`** (gambar) — pre-process (grayscale + autocontrast + upscale teks kecil) → **RapidOCR ONNX**; kalau RapidOCR absent/error/hasilnya kosong → fallback CLI **`tesseract`** (TSV, conf ≥ 35). Mesin yang dipakai ditulis di header; paksa dengan `MCP_OCR_ENGINE`.
+4. **`_read_pdf`** — `pypdfium2` bila ada (teks native per halaman, scan di-render lalu di-OCR); kalau tidak → poppler: `pdftotext`, atau `pdftoppm` + tesseract untuk halaman scan.
+5. **`_extract_palette` / `_read_colors`** (gambar) — flatten RGBA→RGB → downscale → kuantisasi median-cut (PIL) → cluster warna dominan → gabung shade dekat → hitung % area + region.
+6. **Confidence filter** — buang hasil OCR dengan skor < 0.35.
+7. **Output** — header metadata + teks murni, siap dianalisa LLM.
 
 ### Kenapa preprocessing?
 
