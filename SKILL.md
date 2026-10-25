@@ -1,6 +1,6 @@
 ---
 name: mcp-ocr
-description: Baca teks dari GAMBAR dan DOKUMEN via MCP OCR (tool mcp__ocr__read_document, alias mcp__ocr__ocr_image) DAN ekstrak WARNA dominan dari gambar (mcp__ocr__read_colors). Gunakan SAAT user memberikan gambar/screenshot/foto/scan/PDF/Word/Excel/PPT untuk dibaca, dianalisa, atau diperbaiki (screenshot error, stack trace, pesan bug, dokumen scan, proposal PDF, laporan docx, data xlsx, slide pptx), ATAU saat gambar DI-PASTE langsung di kolom chat opencode (error "Cannot read image / model does not support image input") — ekstrak dulu dari DB opencode via extract-pasted-image.py. Juga saat user ingin mengetahui/mengedit WARNA dari screenshot web (copas tampilan web, ganti warna, cari hex): gunakan read_colors. Memberi "mata" ke model teks-only tanpa vision (mis. DeepSeek v4 Flash, DeepSeek R1): semua format diubah menjadi teks murni yang bisa dianalisa. Triggers: baca gambar ini, lihat screenshot, ocr, gambar error, analisa screenshot, fix bug dari gambar, scan dokumen, baca pdf/docx/xlsx/pptx, image to text, mata, vision, paste gambar, gambar tempelan, cannot read image, warna apa, cari hex warna, color palette, warna dominan, edit warna.
+description: Baca teks dari GAMBAR dan DOKUMEN via MCP OCR (tool mcp__ocr__read_document, alias mcp__ocr__ocr_image) DAN ekstrak WARNA dominan dari gambar (mcp__ocr__read_colors). Gunakan SAAT user memberikan gambar/screenshot/foto/scan/PDF/Word/Excel/PPT untuk dibaca, dianalisa, atau diperbaiki (screenshot error, stack trace, pesan bug, dokumen scan, proposal PDF, laporan docx, data xlsx, slide pptx), ATAU saat gambar DI-PASTE langsung di kolom chat opencode (error "Cannot read image / model does not support image input") — ekstrak dulu dari DB opencode via extract-pasted-image.py. Juga saat user ingin mengetahui/mengedit WARNA dari screenshot web (copas tampilan web, ganti warna, cari hex): gunakan read_colors. Memberi "mata" ke model teks-only tanpa vision (mis. DeepSeek v4 Flash, DeepSeek R1): semua format diubah menjadi teks murni yang bisa dianalisa. Triggers: baca gambar ini, lihat screenshot, ocr, gambar error, analisa screenshot, fix bug dari gambar, scan dokumen, baca pdf/docx/xlsx/pptx, image to text, mata, vision, vision_analyze, paste gambar, gambar tempelan, cannot read image, warna apa, cari hex warna, color palette, warna dominan, edit warna, tesseract, ocr tanpa python, sandbox linux.
 ---
 
 # MCP-OCR — Baca Gambar & Dokumen Jadi Teks + Ekstrak Warna
@@ -14,6 +14,34 @@ Gambar / PDF / Word / Excel / PPT
         ▼
 [ MCP OCR Server ] ──► teks murni ──► LLM bisa baca & jawab
 ```
+
+## Dua jalur: VISION vs OCR — pilih yang paling murah
+
+| Situasi | Jalur | Kenapa |
+|---|---|---|
+| Model/tool-nya PUNYA vision (mis. Hermes `vision_analyze`, GPT-4o, Gemini) | **Vision** | bisa "ngerti" gambar: layout, grafik, diagram, UI — bukan cuma teks |
+| Model teks-only (DeepSeek v4 Flash / R1) | **OCR (skill ini)** | file → teks murni → bisa dianalisa |
+| Butuh teks PRESISI (invoice, angka, stack trace, dokumen scan) | **OCR** | teks verbatim; model vision bisa halusinasi angka |
+| Mesin tanpa env Python (sandbox, CI, server polos) | **CLI `ocr.sh`** | tesseract + poppler, nol dependensi Python |
+
+Aturan praktis: **pakai vision dulu kalau ada** (konteks lebih kaya) → kalau angka/teks
+harus persis, atau vision tidak tersedia, jatuh ke **OCR**. Untuk dokumen penting,
+jalankan keduanya lalu bandingkan.
+
+### Jalur VISION (kalau tool-nya ada)
+
+Contoh di Hermes — terbukti jalan walaupun model utamanya teks-only, karena Hermes
+merutekan gambarnya ke model vision:
+
+```
+vision_analyze(image_url="/path/foto.png", question="Baca semua teks & jelaskan isinya")
+vision_analyze(image_url="https://contoh.com/grafik.png", question="Apa tren grafik ini?")
+```
+
+- Menerima path lokal, URL `http(s)`, atau data URL.
+- Pakai `question` yang spesifik; untuk teks panjang minta transkrip verbatim.
+- Gambar yang dikirim user ke chat (mis. foto via Telegram) sudah tersimpan sebagai
+  file — cukup pakai path yang diberikan.
 
 ## Tools
 
@@ -121,6 +149,31 @@ claude mcp add ocr --scope user -- ~/.claude/mcp-ocr/.venv/Scripts/python.exe ~/
 ```
 
 Di Linux/macOS gunakan `.venv/bin/python` alih-alih `.venv/Scripts/python.exe`.
+
+## Fallback CLI `ocr.sh` — OCR tanpa Python
+
+Kalau mesinnya tidak punya env Python (`uv`/pip) — sandbox, CI, server polos, mesin
+Hermes — pakai `ocr.sh` (tesseract + poppler). Nol dependensi Python, hasil teks ke stdout.
+
+```bash
+# Debian/Ubuntu
+sudo apt-get install -y tesseract-ocr tesseract-ocr-ind tesseract-ocr-eng \
+                        poppler-utils imagemagick
+install -m 0755 ocr.sh /usr/local/bin/ocr    # atau ~/.local/bin/ocr
+
+ocr foto.png                  # teks ke stdout (default bahasa ind+eng)
+ocr scan.pdf                  # PDF digital → pdftotext; PDF scan → 300dpi → OCR per halaman
+ocr a.png b.pdf c.jpg         # banyak file sekaligus
+OCR_LANG=eng ocr chart.jpg    # ganti bahasa (mis. dokumen Inggris)
+OCR_DPI=400 ocr scan-kecil.pdf
+```
+
+Bedanya dengan server MCP: `ocr.sh` hanya output teks mentah (tanpa header, tanpa
+`read_colors`, tanpa mode `code`), dan **tidak** membaca docx/xlsx/pptx. Untuk itu
+tetap pakai `read_document`.
+
+Terbukti (uji nyata di sandbox Linux): PNG teks Indonesia + angka, PDF image-only,
+dan gambar yang diblur lalu dikecilkan 60% (simulasi foto HP) — ketiganya kebaca persis.
 
 ## Verifikasi / troubleshooting
 

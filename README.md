@@ -26,6 +26,7 @@ Gambar / PDF / Word / Excel / PPT
 - `read_document(file_path, mode, enhance)` — nama penuh (teks)
 - `ocr_image(image_path, mode, enhance)` — alias kompatibel (teks)
 - `read_colors(file_path, top_n=8, merge=true)` — 🎨 **ekstrak warna dominan dari gambar**
+- `ocr.sh` — 🐧 CLI OCR tanpa Python (tesseract + poppler), buat mesin/sandbox tanpa env Python
 
 ---
 
@@ -65,6 +66,49 @@ Region label: `background`, `header/navbar`, `footer`, `sidebar`, `panel/card`, 
 Banyak LLM yang **murah/cepat hanya teks-only** — mereka menolak gambar (`Cannot read image / model does not support image input`). Padahal pengguna sering paste **screenshot error, stack trace, scan dokumen, proposal PDF**.
 
 Skill ini menjembatani: **file → OCR → teks → LLM**, tanpa perlu model vision yang mahal.
+
+---
+
+## 🧭 Dua Jalur: Vision vs OCR
+
+| Situasi | Jalur | Kenapa |
+|---|---|---|
+| Tool/model-nya **punya vision** (mis. Hermes `vision_analyze`, GPT-4o, Gemini) | **Vision** | bisa "ngerti" gambar: layout, grafik, diagram, UI — bukan cuma teks |
+| Model teks-only (DeepSeek v4 Flash / R1) | **OCR (repo ini)** | file → teks murni → bisa dianalisa |
+| Butuh teks **presisi** (invoice, angka, stack trace, scan) | **OCR** | teks verbatim; model vision bisa halusinasi angka |
+| Mesin **tanpa Python** (sandbox, CI, server polos) | **CLI `ocr.sh`** | tesseract + poppler, nol dependensi Python |
+
+Aturan praktis: **vision dulu kalau ada** → kalau angka/teks harus persis atau vision tidak ada, jatuh ke **OCR**. Untuk dokumen penting, jalankan keduanya lalu bandingkan.
+
+### 👁️ Jalur Vision (kalau tool-nya ada)
+
+Contoh di **Hermes** — terbukti jalan walaupun model utamanya teks-only, karena Hermes merutekan gambarnya ke model vision:
+
+```
+vision_analyze(image_url="/path/foto.png", question="Baca semua teks & jelaskan isinya")
+vision_analyze(image_url="https://contoh.com/grafik.png", question="Apa tren grafik ini?")
+```
+
+Menerima path lokal, URL `http(s)`, atau data URL. Pakai `question` yang spesifik; untuk teks panjang minta transkrip verbatim.
+
+### 🐧 Jalur CLI `ocr.sh` (tanpa Python)
+
+Untuk mesin tanpa env Python (`uv`/pip):
+
+```bash
+sudo apt-get install -y tesseract-ocr tesseract-ocr-ind tesseract-ocr-eng \
+                        poppler-utils imagemagick
+install -m 0755 ocr.sh /usr/local/bin/ocr     # atau ~/.local/bin/ocr
+
+ocr foto.png                # teks ke stdout (default bahasa ind+eng)
+ocr scan.pdf                # PDF digital → pdftotext; PDF scan → 300dpi → OCR/halaman
+ocr a.png b.pdf c.jpg       # banyak file sekaligus
+OCR_LANG=eng ocr chart.jpg  # ganti bahasa
+```
+
+Bedanya dengan server MCP: `ocr.sh` cuma output teks mentah, tanpa `read_colors`, tanpa mode `code`, dan **tidak** membaca docx/xlsx/pptx (untuk itu pakai `read_document`).
+
+> ✅ Uji nyata di sandbox Linux: PNG teks Indonesia + angka, PDF image-only, dan gambar yang diblur + dikecilkan 60% (simulasi foto HP) — ketiganya kebaca persis.
 
 ---
 
@@ -194,6 +238,7 @@ Super-MCP-OCR-Deepseek/
 ├── README.md                      ← dokumentasi ini
 ├── SKILL.md                       ← skill instruction (untuk agent)
 ├── server.py                      ← MCP OCR server (inti + read_colors)
+├── ocr.sh                         ← CLI OCR tanpa Python (tesseract + poppler)
 ├── extract-pasted-image.py        ← helper gambar tempelan opencode
 ├── pyproject.toml                 ← dependensi
 └── .python-version                ← versi Python
@@ -225,6 +270,8 @@ Super-MCP-OCR-Deepseek/
 | `API Error 500 max instances` / `401 Insufficient balance` | Masalah **kuota gateway model**, bukan MCP OCR. Top up saldo, lalu ulangi. |
 | Tool tidak muncul di klien | Restart sesi / `mcp` reconnect. Cek `claude mcp get ocr` → harus `Connected`. |
 | OCR hasil jelek | Pakai `mode="code"` untuk stack trace; cek file dinaikkan resolusi. |
+| Tidak bisa install Python env (sandbox/CI) | Pakai CLI `ocr.sh` (tesseract + poppler), lihat bagian 🧭 Dua Jalur. |
+| Model utama teks-only tapi tool vision ada | Pakai jalur Vision (`vision_analyze`) dulu, OCR sebagai pembanding/presisi. |
 | `.doc`/`.xls` tidak terbaca | Simpan ulang sebagai `.docx`/`.xlsx`. |
 
 ---
